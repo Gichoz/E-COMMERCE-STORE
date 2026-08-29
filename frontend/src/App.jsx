@@ -1,18 +1,21 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import { Toaster } from "react-hot-toast";
+
 import HomePage from "./pages/HomePage";
 import SignUpPage from "./pages/SignUpPage";
 import LoginPage from "./pages/LoginPage";
 import CartPage from "./pages/CartPage";
-import Navbar from "./components/Navbar";
-import { Toaster } from "react-hot-toast";
-import { useUserStore } from "./stores/useUserStore";
-import { useEffect } from "react";
-import LoadingSpinner from "./components/LoadingSpinner";
-import { useCartStore } from "./stores/useCartStore";
 import CategoryPage from "./pages/CategoryPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import PurchaseSuccessPage from "./pages/PurchaseSuccessPage";
 import PurchaseCancelPage from "./pages/PurchaseCancelPage";
+
+import Navbar from "./components/Navbar";
+import LoadingSpinner from "./components/LoadingSpinner";
+
+import { useUserStore } from "./stores/useUserStore";
+import { useCartStore } from "./stores/useCartStore";
 
 function App() {
   const { user, checkAuth, checkingAuth } = useUserStore();
@@ -23,14 +26,17 @@ function App() {
   }, [checkAuth]);
 
   useEffect(() => {
-    if (user) getCartItems();
+    if (user) {
+      getCartItems();
+    }
   }, [user, getCartItems]);
 
   if (checkingAuth) return <LoadingSpinner />;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white relative overflow-hidden">
-      <div className="absolute inset-0 overflow-hidden">
+      {/* Background gradient */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute inset-0">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full bg-[radial-gradient(ellipse_at_top,rgba(16,185,129,0.3)_0%,rgba(10,80,60,0.2)_45%,rgba(0,0,0,0.1)_100%)]" />
         </div>
@@ -40,27 +46,47 @@ function App() {
         <Navbar />
         <Routes>
           <Route path="/" element={<HomePage />} />
-          <Route path="/signup" element={!user ? <SignUpPage /> : <Navigate to="/" />} />
-          <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/" />} />
-          <Route path="/cart" element={user ? <CartPage /> : <Navigate to="/login" />} />
+          <Route
+            path="/signup"
+            element={!user ? <SignUpPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/login"
+            element={!user ? <LoginPage /> : <Navigate to="/" replace />}
+          />
+          <Route
+            path="/cart"
+            element={user ? <CartPage /> : <Navigate to="/login" replace />}
+          />
           <Route path="/category/:category" element={<CategoryPage />} />
-          
+
           {/* Protected Admin Route */}
           <Route
             path="/secret-dashboard"
-            element={user?.role === "admin" ? <AdminDashboard /> : <Navigate to="/login" />}
+            element={
+              user?.role === "admin" ? (
+                <AdminDashboard />
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
           />
 
+          {/* Checkout Status Routes */}
           <Route
             path="/purchase-success"
-            element={user ? <PurchaseSuccessPage /> : <Navigate to="/login" />}
+            element={
+              user ? <PurchaseSuccessPage /> : <Navigate to="/login" replace />
+            }
           />
           <Route
             path="/purchase-cancel"
-            element={user ? <PurchaseCancelPage /> : <Navigate to="/login" />}
+            element={
+              user ? <PurchaseCancelPage /> : <Navigate to="/login" replace />
+            }
           />
 
-          {/* Catch-all route to handle invalid paths like /dashboard */}
+          {/* Fallback route */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
