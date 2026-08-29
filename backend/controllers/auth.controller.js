@@ -23,11 +23,19 @@ export const signup = async (req, res) => {
 
     const user = await User.create({ name, email, password });
 
-    // FIX: Store the token in a variable
+    // Store token and set cookie
     const token = generateTokenAndSetCookie(user._id, res); 
 
-    // Now token exists here
-    await redis.set(`refresh_token:${user._id}`, token, 'EX', 15 * 24 * 60 * 60);
+    // Upstash Redis options object syntax + defensive try/catch wrapper
+    if (token) {
+      try {
+        await redis.set(`refresh_token:${user._id}`, token, {
+          ex: 15 * 24 * 60 * 60, // Expiration in seconds
+        });
+      } catch (redisError) {
+        console.warn("⚠️ Failed to cache token in Upstash Redis:", redisError.message);
+      }
+    }
 
     res.status(201).json({
       _id: user._id,
@@ -41,30 +49,35 @@ export const signup = async (req, res) => {
   }
 };
 
-
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. Validate fields exist
     if (!email || !password) {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
-    // 2. Check for empty strings
     if (!email.trim() || !password.trim()) {
       return res.status(400).json({ message: "Email and password are required" });
     }
 
     const user = await User.findOne({ email });
 
-    // 3. Check user + password. Return early if invalid
     if (!user || !(await user.comparePassword(password))) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
 
-    // 4. If we get here, credentials are valid
-    generateTokenAndSetCookie(user._id, res);
+    const token = generateTokenAndSetCookie(user._id, res);
+
+    if (token) {
+      try {
+        await redis.set(`refresh_token:${user._id}`, token, {
+          ex: 15 * 24 * 60 * 60,
+        });
+      } catch (redisError) {
+        console.warn("⚠️ Failed to cache token in Upstash Redis:", redisError.message);
+      }
+    }
 
     res.status(200).json({
       _id: user._id,
@@ -81,11 +94,22 @@ export const login = async (req, res) => {
 
 export const logout = async (req, res) => {
   try {
+    const refreshToken = req.cookies.refreshToken || req.cookies.jwt;
+    
     res.clearCookie("jwt", {
       httpOnly: true,
       sameSite: "strict",
-      secure: process.env.NODE_ENV !== "development",
+      secure: process.env.NODE_ENV === "production",
     });
+
+    if (req.user?._id) {
+      try {
+        await redis.del(`refresh_token:${req.user._id}`);
+      } catch (redisError) {
+        console.warn("⚠️ Failed to delete token from Upstash Redis:", redisError.message);
+      }
+    }
+
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
     console.log("Error in logout controller:", error.message);

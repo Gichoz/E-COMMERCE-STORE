@@ -2,7 +2,6 @@ import Coupon from "../models/coupon.model.js";
 import Order from "../models/order.model.js";
 import { stripe } from "../lib/stripe.js";
 
-
 export const createCheckoutSession = async (req, res) => {
   try {
     const { products, couponCode } = req.body;
@@ -11,21 +10,19 @@ export const createCheckoutSession = async (req, res) => {
       return res.status(400).json({ message: "Invalid or empty products array" });
     }
 
-let totalAmount = 0;
+    let totalAmount = 0;
 
     const lineItems = products.map((product) => {
-      const amount = Math.round(product.price * 100); // cents
+      const amount = Math.round(product.price * 100); // Amount in cents
       totalAmount += amount * product.quantity;
 
-      // Ensure the image string is a fully qualified URL before sending to Stripe
-      const isValidUrl = product.image && product.image.startsWith("http");
+      const isValidUrl = product.image && typeof product.image === "string" && product.image.startsWith("http");
 
       return {
         price_data: {
           currency: "usd",
           product_data: {
             name: product.name,
-            // FIX: Uses fallback placeholder if product image isn't a live URL
             images: isValidUrl ? [product.image] : ["https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200"],
           },
           unit_amount: amount,
@@ -35,13 +32,15 @@ let totalAmount = 0;
     });
 
     let coupon = null;
+    let stripeCouponId = null;
+
     if (couponCode) {
       coupon = await Coupon.findOne({ code: couponCode, userId: req.user._id, isActive: true });
       if (coupon) {
         totalAmount -= Math.round((totalAmount * coupon.discountPercentage) / 100);
+        stripeCouponId = await createStripeCoupon(coupon.discountPercentage);
       }
     }
-    console.log("CLIENT_URL =", process.env.CLIENT_URL);
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
@@ -49,13 +48,7 @@ let totalAmount = 0;
       mode: "payment",
       success_url: `${process.env.CLIENT_URL}/purchase-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.CLIENT_URL}/purchase-cancel`,
-      discounts: coupon
-        ? [
-            {
-              coupon: await createStripeCoupon(coupon.discountPercentage),
-            },
-          ]
-        : [],
+      discounts: stripeCouponId ? [{ coupon: stripeCouponId }] : [],
       metadata: {
         userId: req.user._id.toString(),
         couponCode: couponCode || "",
@@ -73,14 +66,13 @@ let totalAmount = 0;
       await createNewCoupon(req.user._id);
     }
 
-    // Ensure session.url is explicitly passed back to the client side
     res.status(200).json({ 
       id: session.id, 
       totalAmount: totalAmount / 100,
       url: session.url 
     });
   } catch (error) {
-    console.log("Error in createCheckoutSession controller:", error.message);
+    console.error("Error in createCheckoutSession controller:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
@@ -93,7 +85,6 @@ export const checkoutSuccess = async (req, res) => {
       return res.status(400).json({ message: "Missing sessionId in request body" });
     }
 
-    // 1. Initial lookup check
     const existingOrder = await Order.findOne({ stripeSessionId: sessionId });
     if (existingOrder) {
       return res.status(200).json({
@@ -120,7 +111,6 @@ export const checkoutSuccess = async (req, res) => {
         return res.status(400).json({ message: "Invalid product metadata format" });
       }
 
-      // 2. Safe Database Write with a duplicate key catch block
       try {
         const newOrder = new Order({
           user: session.metadata.userId,
@@ -141,7 +131,6 @@ export const checkoutSuccess = async (req, res) => {
           orderId: newOrder._id,
         });
       } catch (dbError) {
-        // Catch duplicate key error if it slips past the initial findOne check
         if (dbError.code === 11000) {
           const fallbackOrder = await Order.findOne({ stripeSessionId: sessionId });
           return res.status(200).json({
@@ -150,35 +139,45 @@ export const checkoutSuccess = async (req, res) => {
             orderId: fallbackOrder?._id,
           });
         }
-        throw dbError; // Pass down other database errors
+        throw dbError;
       }
     }
 
     return res.status(400).json({ message: "Session payment status is unpaid." });
 
   } catch (error) {
-    console.log("Error in checkoutSuccess controller:", error.message);
+    console.error("Error in checkoutSuccess controller:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
 async function createStripeCoupon(discountPercentage) {
-  const coupon = await stripe.coupons.create({
-    percent_off: discountPercentage,
-    duration: "once",
-  });
-  return coupon.id;
+  try {
+    const coupon = await stripe.coupons.create({
+      percent_off: discountPercentage,
+      duration: "once",
+    });
+    return coupon.id;
+  } catch (error) {
+    console.error("Error creating Stripe coupon:", error);
+    return null;
+  }
 }
 
 async function createNewCoupon(userId) {
-  await Coupon.findOneAndDelete({ userId });
+  try {
+    await Coupon.findOneAndDelete({ userId });
 
-  const newCoupon = new Coupon({
-    code: "GIFT" + Math.random().toString(36).substring(2, 8).toUpperCase(),
-    discountPercentage: 10,
-    expirationDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-    userId: userId,
-  });
+    const newCoupon = new Coupon({
+      code: "GIFT" + Math.random().toString(36).substring(2, 8).toUpperCase(),
+      discountPercentage: 10,
+      expirationDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      userId: userId,
+    });
 
-  await newCoupon.save();
-  return newCoupon;
+    await newCoupon.save();
+    return newCoupon;
+  } catch (error) {
+    console.error("Error generating new reward coupon:", error);
+  }
 }

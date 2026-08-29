@@ -44,9 +44,24 @@ function App() {
           <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/" />} />
           <Route path="/cart" element={user ? <CartPage /> : <Navigate to="/login" />} />
           <Route path="/category/:category" element={<CategoryPage />} />
-          <Route path="/secret-dashboard" element={<AdminDashboard />} />
-          <Route path="/purchase-success" element={<PurchaseSuccessPage />} />
-          <Route path="/purchase-cancel" element={<PurchaseCancelPage />} />
+          
+          {/* Protected Admin Route */}
+          <Route
+            path="/secret-dashboard"
+            element={user?.role === "admin" ? <AdminDashboard /> : <Navigate to="/login" />}
+          />
+
+          <Route
+            path="/purchase-success"
+            element={user ? <PurchaseSuccessPage /> : <Navigate to="/login" />}
+          />
+          <Route
+            path="/purchase-cancel"
+            element={user ? <PurchaseCancelPage /> : <Navigate to="/login" />}
+          />
+
+          {/* Catch-all route to handle invalid paths like /dashboard */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
       <Toaster />
