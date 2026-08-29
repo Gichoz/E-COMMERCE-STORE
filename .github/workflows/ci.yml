@@ -25,6 +25,12 @@ jobs:
         run: |
           docker build ./frontend --file ./frontend/Dockerfile --tag frontend:test
 
+      - name: Create Dummy .env for CI
+        run: |
+          touch .env
+          echo "PORT=5000" >> .env
+          echo "DATABASE_URL=postgresql://user:pass@localhost:5432/testdb" >> .env
+
       - name: Verify Docker Compose Configuration
         run: |
           docker compose config
