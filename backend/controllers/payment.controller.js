@@ -7,6 +7,22 @@ const getClientUrl = () => {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 };
 
+// Helper function to safely validate image URLs for Stripe
+const getValidImageUrl = (img) => {
+  if (!img || typeof img !== "string") {
+    return "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200";
+  }
+  try {
+    const parsed = new URL(img);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return img;
+    }
+  } catch (_) {
+    // If URL parsing fails, fallback safely
+  }
+  return "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200";
+};
+
 export const createCheckoutSession = async (req, res) => {
   try {
     const { products, couponCode } = req.body;
@@ -20,23 +36,16 @@ export const createCheckoutSession = async (req, res) => {
     const lineItems = products.map((product) => {
       const price = Number(product.price) || 0;
       const quantity = Number(product.quantity) || 1;
-      const amount = Math.round(price * 100); // Stripe requires integer cents
+      const amount = Math.round(price * 100);
       
       totalAmount += amount * quantity;
-
-      const isValidUrl =
-        product.image &&
-        typeof product.image === "string" &&
-        product.image.startsWith("http");
 
       return {
         price_data: {
           currency: "usd",
           product_data: {
             name: product.name || "Product",
-            images: isValidUrl
-              ? [product.image]
-              : ["https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200"],
+            images: [getValidImageUrl(product.image)],
           },
           unit_amount: amount,
         },
