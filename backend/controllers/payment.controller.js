@@ -2,6 +2,12 @@ import Coupon from "../models/coupon.model.js";
 import Order from "../models/order.model.js";
 import { stripe } from "../lib/stripe.js";
 
+// Helper function to resolve client URL safely
+const getClientUrl = () => {
+  const url = process.env.CLIENT_URL || "https://e-commerce-store-5eia.onrender.com";
+  return url.endsWith("/") ? url.slice(0, -1) : url;
+};
+
 export const createCheckoutSession = async (req, res) => {
   try {
     const { products, couponCode } = req.body;
@@ -16,14 +22,19 @@ export const createCheckoutSession = async (req, res) => {
       const amount = Math.round(product.price * 100); // Amount in cents
       totalAmount += amount * product.quantity;
 
-      const isValidUrl = product.image && typeof product.image === "string" && product.image.startsWith("http");
+      const isValidUrl =
+        product.image &&
+        typeof product.image === "string" &&
+        product.image.startsWith("http");
 
       return {
         price_data: {
           currency: "usd",
           product_data: {
             name: product.name,
-            images: isValidUrl ? [product.image] : ["https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200"],
+            images: isValidUrl
+              ? [product.image]
+              : ["https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200"],
           },
           unit_amount: amount,
         },
@@ -35,26 +46,32 @@ export const createCheckoutSession = async (req, res) => {
     let stripeCouponId = null;
 
     if (couponCode) {
-      coupon = await Coupon.findOne({ code: couponCode, userId: req.user._id, isActive: true });
+      coupon = await Coupon.findOne({
+        code: couponCode,
+        userId: req.user._id,
+        isActive: true,
+      });
       if (coupon) {
         totalAmount -= Math.round((totalAmount * coupon.discountPercentage) / 100);
         stripeCouponId = await createStripeCoupon(coupon.discountPercentage);
       }
     }
 
+    const clientUrl = getClientUrl();
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: lineItems,
       mode: "payment",
-      success_url: `${process.env.CLIENT_URL}/purchase-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL}/purchase-cancel`,
+      success_url: `${clientUrl}/purchase-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${clientUrl}/purchase-cancel`,
       discounts: stripeCouponId ? [{ coupon: stripeCouponId }] : [],
       metadata: {
         userId: req.user._id.toString(),
         couponCode: couponCode || "",
         products: JSON.stringify(
           products.map((p) => ({
-            id: p._id,
+            id: p._id || p.id,
             quantity: p.quantity,
             price: p.price,
           }))
@@ -66,10 +83,10 @@ export const createCheckoutSession = async (req, res) => {
       await createNewCoupon(req.user._id);
     }
 
-    res.status(200).json({ 
-      id: session.id, 
+    res.status(200).json({
+      id: session.id,
       totalAmount: totalAmount / 100,
-      url: session.url 
+      url: session.url,
     });
   } catch (error) {
     console.error("Error in createCheckoutSession controller:", error);
@@ -144,7 +161,6 @@ export const checkoutSuccess = async (req, res) => {
     }
 
     return res.status(400).json({ message: "Session payment status is unpaid." });
-
   } catch (error) {
     console.error("Error in checkoutSuccess controller:", error);
     res.status(500).json({ message: "Server error", error: error.message });
