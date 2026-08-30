@@ -25,13 +25,36 @@ const PORT = process.env.PORT || 5000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Middlewares (Must come AFTER 'const app = express()')
+// Define allowed origins explicitly to avoid env variable resolution issues
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://e-commerce-store-5eia.onrender.com",
+  process.env.CLIENT_URL,
+].filter(Boolean);
+
+// CORS Middleware Configuration
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like Postman or server-to-server calls)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS policy blocked request from origin: ${origin}`));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+// Body Parsing Middlewares
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
 app.use(cookieParser());
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 
-// Routes
+// API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/cart", cartRoutes);
@@ -39,20 +62,14 @@ app.use("/api/payments", paymentRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/coupons", couponRoutes);
 
-// Production Static Serving
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist")));
-
-  app.use((req, res) => {
-    res.sendFile(path.resolve(__dirname, "../frontend/dist/index.html"));
-  });
-}
+// Static Serving Disabled for Decoupled Production Architecture
+// (Your React frontend is hosted separately on Render Static Sites)
 
 // Start Server & Connect DB
 const startServer = async () => {
   await connectDB();
   app.listen(PORT, () => {
-    console.log("Server started at http://localhost:" + PORT);
+    console.log(`Server running on port ${PORT}`);
   });
 };
 
