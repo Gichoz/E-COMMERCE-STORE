@@ -2,7 +2,6 @@ import Coupon from "../models/coupon.model.js";
 import Order from "../models/order.model.js";
 import { stripe } from "../lib/stripe.js";
 
-// Helper function to resolve client URL safely
 const getClientUrl = () => {
   const url = process.env.CLIENT_URL || "https://e-commerce-store-5eia.onrender.com";
   return url.endsWith("/") ? url.slice(0, -1) : url;
@@ -19,8 +18,11 @@ export const createCheckoutSession = async (req, res) => {
     let totalAmount = 0;
 
     const lineItems = products.map((product) => {
-      const amount = Math.round(product.price * 100); // Amount in cents
-      totalAmount += amount * product.quantity;
+      const price = Number(product.price) || 0;
+      const quantity = Number(product.quantity) || 1;
+      const amount = Math.round(price * 100); // Stripe requires integer cents
+      
+      totalAmount += amount * quantity;
 
       const isValidUrl =
         product.image &&
@@ -31,22 +33,21 @@ export const createCheckoutSession = async (req, res) => {
         price_data: {
           currency: "usd",
           product_data: {
-            name: product.name,
+            name: product.name || "Product",
             images: isValidUrl
               ? [product.image]
               : ["https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200"],
           },
           unit_amount: amount,
         },
-        quantity: product.quantity || 1,
+        quantity,
       };
     });
 
-    let coupon = null;
     let stripeCouponId = null;
 
     if (couponCode) {
-      coupon = await Coupon.findOne({
+      const coupon = await Coupon.findOne({
         code: couponCode,
         userId: req.user._id,
         isActive: true,
@@ -83,14 +84,14 @@ export const createCheckoutSession = async (req, res) => {
       await createNewCoupon(req.user._id);
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       id: session.id,
       totalAmount: totalAmount / 100,
       url: session.url,
     });
   } catch (error) {
-    console.error("Error in createCheckoutSession controller:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("🔥 STRIPE CHECKOUT ERROR:", error.message);
+    return res.status(500).json({ message: error.message || "Server error" });
   }
 };
 
@@ -106,7 +107,7 @@ export const checkoutSuccess = async (req, res) => {
     if (existingOrder) {
       return res.status(200).json({
         success: true,
-        message: "Order already processed and saved successfully.",
+        message: "Order already processed.",
         orderId: existingOrder._id,
       });
     }
@@ -128,42 +129,30 @@ export const checkoutSuccess = async (req, res) => {
         return res.status(400).json({ message: "Invalid product metadata format" });
       }
 
-      try {
-        const newOrder = new Order({
-          user: session.metadata.userId,
-          products: products.map((product) => ({
-            product: product.id || product._id,
-            quantity: product.quantity,
-            price: product.price,
-          })),
-          totalAmount: session.amount_total / 100,
-          stripeSessionId: sessionId,
-        });
+      const newOrder = new Order({
+        user: session.metadata.userId,
+        products: products.map((product) => ({
+          product: product.id || product._id,
+          quantity: product.quantity,
+          price: product.price,
+        })),
+        totalAmount: session.amount_total / 100,
+        stripeSessionId: sessionId,
+      });
 
-        await newOrder.save();
+      await newOrder.save();
 
-        return res.status(200).json({
-          success: true,
-          message: "Payment successful, order created.",
-          orderId: newOrder._id,
-        });
-      } catch (dbError) {
-        if (dbError.code === 11000) {
-          const fallbackOrder = await Order.findOne({ stripeSessionId: sessionId });
-          return res.status(200).json({
-            success: true,
-            message: "Order handled safely.",
-            orderId: fallbackOrder?._id,
-          });
-        }
-        throw dbError;
-      }
+      return res.status(200).json({
+        success: true,
+        message: "Payment successful.",
+        orderId: newOrder._id,
+      });
     }
 
-    return res.status(400).json({ message: "Session payment status is unpaid." });
+    return res.status(400).json({ message: "Payment status unpaid." });
   } catch (error) {
-    console.error("Error in checkoutSuccess controller:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error("Error in checkoutSuccess:", error);
+    return res.status(500).json({ message: error.message || "Server error" });
   }
 };
 
@@ -188,12 +177,12 @@ async function createNewCoupon(userId) {
       code: "GIFT" + Math.random().toString(36).substring(2, 8).toUpperCase(),
       discountPercentage: 10,
       expirationDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      userId: userId,
+      userId,
     });
 
     await newCoupon.save();
     return newCoupon;
   } catch (error) {
-    console.error("Error generating new reward coupon:", error);
+    console.error("Error generating new coupon:", error);
   }
 }
